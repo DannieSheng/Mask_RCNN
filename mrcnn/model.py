@@ -18,10 +18,15 @@ import multiprocessing
 import numpy as np
 import tensorflow as tf
 import keras
+# from tensorflow import keras as keras
 import keras.backend as K
+# import tensorflow.keras.backend as K
 import keras.layers as KL
+# import tensorflow.keras.layers as KL
 import keras.engine as KE
+# from tensorflow.keras.layers import Layer
 import keras.models as KM
+# import tensorflow.keras.models as KM
 
 from mrcnn import utils
 
@@ -253,6 +258,7 @@ def clip_boxes_graph(boxes, window):
 
 
 class ProposalLayer(KE.Layer):
+# class ProposalLayer(Layer):
     """Receives anchor scores and selects a subset to pass as proposals
     to the second stage. Filtering is done based on anchor scores and
     non-max suppression to remove overlaps. It also applies bounding
@@ -341,6 +347,7 @@ def log2_graph(x):
     return tf.log(x) / tf.log(2.0)
 
 
+# class PyramidROIAlign(Layer):
 class PyramidROIAlign(KE.Layer):
     """Implements ROI Pooling on multiple levels of the feature pyramid.
 
@@ -618,7 +625,7 @@ def detection_targets_graph(proposals, gt_class_ids, gt_boxes, gt_masks, config)
 
     return rois, roi_gt_class_ids, deltas, masks
 
-
+# class DetectionTargetLayer(Layer):
 class DetectionTargetLayer(KE.Layer):
     """Subsamples proposals and generates target box refinement, class_ids,
     and masks for each.
@@ -2093,11 +2100,13 @@ class MaskRCNN():
         return checkpoint
 
     def load_weights(self, filepath, by_name=False, exclude=None):
+
         """Modified version of the corresponding Keras function with
         the addition of multi-GPU support and the ability to exclude
         some layers from loading.
         exclude: list of layer names to exclude
         """
+
         import h5py
         # Conditional import to support versions of Keras before 2.2
         # TODO: remove in about 6 months (end of 2018)
@@ -2118,6 +2127,7 @@ class MaskRCNN():
 
         # In multi-GPU training, we wrap the model. Get layers
         # of the inner model because they have the weights.
+
         keras_model = self.keras_model
         layers = keras_model.inner_model.layers if hasattr(keras_model, "inner_model")\
             else keras_model.layers
