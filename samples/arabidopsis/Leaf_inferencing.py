@@ -34,7 +34,7 @@ from mrcnn.config import Config
 from mrcnn import utils
 from mrcnn import model as modellib
 from mrcnn import visualize
-import xarray as xr
+# import xarray as xr
 
 def _get_ax(rows=1, cols=1, size=16):  # ???
     """Return a Matplotlib Axes array to be used in
@@ -209,7 +209,7 @@ class LeavesDataset(utils.Dataset):
                 image_id=image_id,
                 path=os.path.join(dataset_dir, img_name))  ##
 
-    def load_mask(self, mask_dir, image_id):
+    def load_mask(self, image_id):
         """Generate instance masks for an image.
        Returns:
         masks: A bool array of shape [height, width, instance count] with
@@ -217,8 +217,8 @@ class LeavesDataset(utils.Dataset):
         class_ids: a 1D array of class IDs of the instance masks.
         """
         info = self.image_info[image_id]
-        # # Get mask directory from image path
-        # mask_dir = os.path.join(os.path.dirname(os.path.dirname(info['path'])), "masks")
+        # Get mask directory from image path
+        mask_dir = os.path.join(os.path.dirname(info['path']), "masks")
 
         # Read mask files from .pkl image
         # mask = []
@@ -227,7 +227,8 @@ class LeavesDataset(utils.Dataset):
         #         m = skimage.io.imread(os.path.join(mask_dir, f)).astype(np.bool)
         #         mask.append(m)
         # mask = np.stack(mask, axis=-1)
-        mask = pkl.load(open(os.path.split(info['path'])[1].replace(".png", ".pkl"), "rb"))["masks"]
+        mask_name = os.path.split(info['path'])[1].replace(".png", ".pkl")
+        mask = pkl.load(open(os.path.join(mask_dir, mask_name), "rb"))["masks"]
         # Return mask, and array of class IDs of each instance. Since we have
         # one class ID, we return an array of ones
         return mask, np.ones([mask.shape[-1]], dtype=np.int32)
