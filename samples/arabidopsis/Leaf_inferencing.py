@@ -20,6 +20,8 @@ import os
 import sys
 import datetime 
 import numpy as np
+import skimage.io
+import pickle as pkl
 import json
 from plantcv import plantcv as pcv 
 
@@ -32,6 +34,7 @@ from mrcnn.config import Config
 from mrcnn import utils
 from mrcnn import model as modellib
 from mrcnn import visualize
+import xarray as xr
 
 def _get_ax(rows=1, cols=1, size=16):  # ???
     """Return a Matplotlib Axes array to be used in
@@ -159,9 +162,36 @@ class LeavesInferenceConfig(LeavesConfig):
 
 
 class LeavesDataset(utils.Dataset):
-    """
+    def __init__(self):
+        super().__init__()
+        self.image_ds = None
+        # def load_leaves(self, dataset_dir, img_names):
+    #     """Load a subset of the leaf dataset.
+    #
+    #     dataset_dir: Root direcotry of the dataset
+    #     image_ids: A list that includes all the images to load
+    #     """
+    #     # Add classes. We only have one class to add---leaves
+    #     # Naming the dataset 'leaves'
+    #     self.add_class('leaves', 1, 'leaves')
+    #
+    #     # Add images
+    #     for (image_id, img_name) in enumerate(img_names):
+    #         self.add_image(
+    #             'leaves',
+    #             image_id=image_id,
+    #             path=os.path.join(dataset_dir, img_name))  ##
 
-    """
+    ### Test a new definition of "LeavesDataset" that takes the x-array inputs
+    def add_image(self, source, image_id, path, **kwargs):
+        image_info = {
+            "id": image_id,
+            "source": source,
+            "path": path,
+        }
+        image_info.update(kwargs)
+        self.image_info.append(image_info)
+
     def load_leaves(self, dataset_dir, img_names):
         """Load a subset of the leaf dataset.
 
@@ -173,11 +203,53 @@ class LeavesDataset(utils.Dataset):
         self.add_class('leaves', 1, 'leaves')
 
         # Add images
-        for (image_id,img_name) in enumerate(img_names):
+        for (image_id, img_name) in enumerate(img_names):
             self.add_image(
                 'leaves',
                 image_id=image_id,
                 path=os.path.join(dataset_dir, img_name))  ##
+
+    def load_mask(self, mask_dir, image_id):
+        """Generate instance masks for an image.
+       Returns:
+        masks: A bool array of shape [height, width, instance count] with
+            one mask per instance.
+        class_ids: a 1D array of class IDs of the instance masks.
+        """
+        info = self.image_info[image_id]
+        # # Get mask directory from image path
+        # mask_dir = os.path.join(os.path.dirname(os.path.dirname(info['path'])), "masks")
+
+        # Read mask files from .pkl image
+        # mask = []
+        # for f in next(os.walk(mask_dir))[2]:
+        #     if f.endswith(".png"):
+        #         m = skimage.io.imread(os.path.join(mask_dir, f)).astype(np.bool)
+        #         mask.append(m)
+        # mask = np.stack(mask, axis=-1)
+        mask = pkl.load(open(os.path.split(info['path'])[1].replace(".png", ".pkl"), "rb"))["masks"]
+        # Return mask, and array of class IDs of each instance. Since we have
+        # one class ID, we return an array of ones
+        return mask, np.ones([mask.shape[-1]], dtype=np.int32)
+
+    def load_image_ds(self, dataset_dir, plant_idx = 1):
+        self.image_ds = xr.open_dataset(dataset_dir)
+
+    def load_image(self, image_id):
+        """Load the specified image and return a [H,W,3] Numpy array.
+        """
+        # Load image
+        image = skimage.io.imread(self.image_info[image_id]['path'])
+        # If grayscale. Convert to RGB for consistency.
+        if image.ndim != 3:
+            import pdb
+            pdb.set_trace()
+        #     image = skimage.color.gray2rgb(image)
+        # # If has an alpha channel, remove it for consistency
+        # if image.shape[-1] == 4:
+        #     image = image[..., :3]
+        return image
+
 
 def rle_encode(mask):
     """Encodes a mask in Run Length Encoding (RLE).
@@ -234,21 +306,22 @@ def mask_to_rle(image_id, mask, scores):
         lines.append("{}, {}".format(image_id, rle))
     return "\n".join(lines)
 
+
 # Inferencing
-def detect(mrcnn_model, dataset_dir, img_names):
+def detect(mrcnn_model, dataset_dir, img_names, save_dir):
     """Run detection on images in the given directory."""
     print("Running on {}".format(dataset_dir))
 
     # Create directory to store detecting result. 
-    if not os.path.exists(RESULTS_DIR):
-        os.makedirs(RESULTS_DIR)
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
     submit_dir = "submit_{:%Y%m%dT%H%M%S}".format(datetime.datetime.now())
-    submit_dir = os.path.join(RESULTS_DIR, submit_dir)
+    submit_dir = os.path.join(save_dir, submit_dir)
     os.makedirs(submit_dir)
 
-    obj_config = dict((name, getattr(mrcnn_model.config,name)) for name in ["DETECTION_MIN_CONFIDENCE","DETECTION_NMS_THRESHOLD",
-                                                                            "IMAGE_MAX_DIM","IMAGE_MIN_DIM","IMAGE_MIN_SCALE",
-                                                                            "IMAGE_RESIZE_MODE","IMAGE_SHAPE"])
+    obj_config = dict((name, getattr(mrcnn_model.config,name)) for name in
+                      ["DETECTION_MIN_CONFIDENCE", "DETECTION_NMS_THRESHOLD", "IMAGE_MAX_DIM","IMAGE_MIN_DIM",
+                       "IMAGE_MIN_SCALE", "IMAGE_RESIZE_MODE","IMAGE_SHAPE"])
     # obj_config = dict((name, getattr(mrcnn_model.config,name)) for name in dir(mrcnn_model.config) if (not name.startswith('__')))
     for key in obj_config:
         if type(obj_config[key]) is np.ndarray:
@@ -286,10 +359,9 @@ def detect(mrcnn_model, dataset_dir, img_names):
 
         submission.append(rle)
         # Save image with masks
-        visualize.display_instances(image, r['rois'], r['masks'], r['class_ids'], dataset_test.class_names,
-                                    r['scores'], ax=_get_ax(rows=1, cols=1, size=16), show_bbox=True, show_mask=True, title="Predictions")
+        visualize.display_instances(image, r['rois'], r['masks'], r['class_ids'], dataset_test.class_names, r['scores'],
+                                    ax=_get_ax(rows=1, cols=1, size=16), show_bbox=True, show_mask=True, title="Predictions")
         vis_name = dataset_test.image_info[image_id]['path'].replace(dataset_dir,submit_dir)
-        # vis_name = vis_name.replace(".png",f".{r0}_{c0}_{r_}_{c_}.png")
         plt.savefig(vis_name)
         plt.close("all")
     # Save to csv file
@@ -319,46 +391,44 @@ def detect(mrcnn_model, dataset_dir, img_names):
 if __name__ == '__main__':
     import argparse
     import tensorflow as tf
+    
     # Parse command line arguments
     parser = argparse.ArgumentParser(
         description='Mask R-CNN for leaf counting and segmentation')
-    # parser.add_argument("command",
-    #                     metavar="<command>",
-    #                     help="'train' or 'detect'")
-    parser.add_argument('--img_names', required=False,
-                        metavar="/list/of/images/",
-                        help='list of image names')
-    parser.add_argument('--dataset_dir', required=False,
-                        metavar="/path/to/dataset_dir/",
+    parser.add_argument('--command', required=False, default='detect', metavar="<command>", help="'train' or 'detect'")
+    parser.add_argument('--img_names', required=False, metavar="/list/of/images/", help='list of image names')
+    parser.add_argument('--dataset_dir', required=False, metavar="/path/to/dataset_dir/",
                         help='Root directory of the dataset_dir')
-    parser.add_argument('--weights', required=False,
-                        metavar="/path/to/weights.h5",
-                        help="Path to weights .h5 file")
-    parser.add_argument('--logs', required=False,
-                        default=DEFAULT_LOGS_DIR,
-                        metavar="/path/to/logs/",
+    parser.add_argument('--weights', required=False, metavar="/path/to/weights.h5", help="Path to weights .h5 file")
+    parser.add_argument('--logs', required=False, default=DEFAULT_LOGS_DIR, metavar="/path/to/logs/",
                         help='Logs and checkpoints directory (default=logs/)')
+    parser.add_argument('--save_dir', required=False, metavar="/path/to/save/" )
+
     args = parser.parse_args()
     if not args.dataset_dir:
         args.dataset_dir = DATA_DIR
     if not args.weights:
         args.weights = LEAF_WEIGHTS_PATH
+    if not args.save_dir:
+        args.save_dir = RESULTS_DIR
 
     # Validate arguments
-    # if args.command == "train":
-    #     assert args.dataset_dir, "Argument --dataset_dir is required for training"
-    # if args.command == "detect":
-    assert args.dataset_dir, "Provide --dataset_dir to run prediction on"
+    if args.command == "train":
+        assert args.dataset_dir, "Argument --dataset_dir is required for training"
+    elif args.command == "detect":
+        assert args.dataset_dir, "Provide --dataset_dir to run prediction on"
+    else:
+        print(f"'{args.command}' is not recognized. Use 'train' or 'detect'")
 
     print("Weights: ", args.weights)
     print("Dataset: ", args.dataset_dir)
     print("Logs: ", args.logs)
 
     # Configurations
-    # if args.command == "train":
-    #     config = LeavesConfig()
-    # else:
-    config = LeavesInferenceConfig()
+    if args.command == "train":
+        config = LeavesConfig()
+    elif  args.command == "detect":
+        config = LeavesInferenceConfig()
     config.display()
 
     # Create model
@@ -374,17 +444,13 @@ if __name__ == '__main__':
 
     if not args.img_names:
         args.img_names = os.listdir(args.dataset_dir)
-    else:
-        args.img_names = args.img_names.split(" ")
-
-    # Train or evaluate
-    # if args.command == "train":
-    #     train(model, args.dataset_dir)
-    # elif args.command == "detect":
-    detect(model, args.dataset_dir, args.img_names)
     # else:
-    #     print("'{}' is not recognized. "
-    #           "Use 'train' or 'detect'".format(args.command))
+    #     args.img_names = args.img_names.split(" ")
+
+    if args.command == "train":
+        pass
+    elif args.command == "detect":
+        detect(model, args.dataset_dir, args.img_names, args.save_dir)
 
 
 
@@ -413,11 +479,11 @@ if __name__ == '__main__':
 # img_names = os.listdir(dataset_dir)
 #
 # # Train or evaluate
-# # if args.command == "train":
-# #     train(model, args.dataset_dir)
-# # elif args.command == "detect":
-# detect(model, dataset_dir, img_names)
-# # else:
-# #     print("'{}' is not recognized. "
-# #           "Use 'train' or 'detect'".format(args.command))
+# if args.command == "train":
+#     train(model, args.dataset_dir)
+# elif args.command == "detect":
+#     detect(model, dataset_dir, img_names)
+# else:
+#     print("'{}' is not recognized. "
+#           "Use 'train' or 'detect'".format(args.command))
 
